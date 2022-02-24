@@ -1,6 +1,6 @@
 #include "plugin.hh"
 
-GRBEnv env = GRBEnv();
+GRBEnv env = GRBEnv(true);
 
 int seed = 0;
 int n_constraints = 50;
@@ -17,6 +17,8 @@ int strategy = 3;
 int runtime;
 
 void AngleBounded2DSimplificationPlugin::initializePlugin() {
+    env.set(GRB_IntParam_LogToConsole, false);
+    env.start();
     std::setlocale(LC_NUMERIC, "en_US.UTF-8");
     id = -1;
     if (OpenFlipper::Options::gui()) {
