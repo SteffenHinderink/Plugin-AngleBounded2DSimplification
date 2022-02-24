@@ -1,9 +1,5 @@
 # Angle-Bounded 2D Mesh Simplification
 
-This is the implementation for the paper "Angle-Bounded 2D Mesh Simplification" submitted to GMP 2022.
-It is implemented as a plugin for the geometry processing software OpenFlipper.
-It was tested on Mac and Linux.
-
 ## Prerequisites
 
 - OpenFlipper: https://www.graphics.rwth-aachen.de/software/openflipper/
