@@ -103,20 +103,25 @@ void AngleBounded2DSimplificationPlugin::initializePlugin() {
 
 void AngleBounded2DSimplificationPlugin::pluginsInitialized(const QVector<QPair<QString, QString>>& pluginOptions) {
     if (!OpenFlipper::Options::gui()) {
-        bool random = true;
-        std::string filename;
+        std::string in_filename = "";
+        std::string out_filename = "";
         for (auto it = pluginOptions.begin(); it != pluginOptions.end(); it++) {
-            if (it->first.toStdString() == "input") {
-                random = false;
-                filename = it->second.toStdString();
+            if (it->first.toStdString() == "in") {
+                in_filename = it->second.toStdString();
+            }
+            if (it->first.toStdString() == "out") {
+                out_filename = it->second.toStdString();
             }
         }
-        if (random) {
+        if (in_filename == "") {
             triangulate_random();
         } else {
-            triangulate_file(filename);
+            triangulate_file(in_filename);
         }
         decimate();
+        if (out_filename != "") {
+            OpenMesh::IO::write_mesh(*mesh, out_filename);
+        }
     }
 }
 
