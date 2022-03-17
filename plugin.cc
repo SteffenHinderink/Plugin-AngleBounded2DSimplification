@@ -1,6 +1,8 @@
 #include "plugin.hh"
 
+#ifdef GUROBI
 GRBEnv env = GRBEnv(true);
+#endif
 
 int seed = 0;
 int n_constraints = 50;
@@ -17,8 +19,10 @@ int strategy = 3;
 int runtime;
 
 void AngleBounded2DSimplificationPlugin::initializePlugin() {
+#ifdef GUROBI
     env.set(GRB_IntParam_LogToConsole, false);
     env.start();
+#endif
     std::setlocale(LC_NUMERIC, "en_US.UTF-8");
     id = -1;
     if (OpenFlipper::Options::gui()) {
@@ -94,6 +98,25 @@ void AngleBounded2DSimplificationPlugin::initializePlugin() {
         connect(decimateButton, SIGNAL(clicked()), this, SLOT(start_thread()));
 
         emit addToolbox("Angle-Bounded 2D Mesh Simplification", toolbox);
+    }
+}
+
+void AngleBounded2DSimplificationPlugin::pluginsInitialized(const QVector<QPair<QString, QString>>& pluginOptions) {
+    if (!OpenFlipper::Options::gui()) {
+        bool random = true;
+        std::string filename;
+        for (auto it = pluginOptions.begin(); it != pluginOptions.end(); it++) {
+            if (it->first.toStdString() == "input") {
+                random = false;
+                filename = it->second.toStdString();
+            }
+        }
+        if (random) {
+            triangulate_random();
+        } else {
+            triangulate_file(filename);
+        }
+        decimate();
     }
 }
 
@@ -273,23 +296,23 @@ void AngleBounded2DSimplificationPlugin::delaunayMeshing() {
         int id2 = add_point_constraint(h.second, in_pt_map, in_points, p_id);
         add_segment_constraint(id1, id2, seg_id, in_segments, in_segment_markers);
     }
-
-    std::vector<double> bbox = getBbox(m_features);
-    std::vector<OpenMesh::Vec2d> bbox_pt;
-    double bbox_offset_factor = 1.5;
-    bbox[1] *= bbox_offset_factor;
-    bbox[3] *= bbox_offset_factor;
-    bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] + bbox[1], bbox[2] + bbox[3]));
-    bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] - bbox[1], bbox[2] + bbox[3]));
-    bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] - bbox[1], bbox[2] - bbox[3]));
-    bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] + bbox[1], bbox[2] - bbox[3]));
-    for (int i = 0; i < 4; i++)
-        add_point_constraint(bbox_pt[i], in_pt_map, in_points, p_id);
-    for (int i = 0; i < 4; i++) {
-        m_features.push_back(std::make_pair(bbox_pt[i], bbox_pt[(i + 1) % 4]));
-        add_segment_constraint(in_pt_map[bbox_pt[i]], in_pt_map[bbox_pt[(i + 1) % 4]], seg_id, in_segments, in_segment_markers);
+    if (bb) {
+        std::vector<double> bbox = getBbox(m_features);
+        std::vector<OpenMesh::Vec2d> bbox_pt;
+        double bbox_offset_factor = 1.5;
+        bbox[1] *= bbox_offset_factor;
+        bbox[3] *= bbox_offset_factor;
+        bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] + bbox[1], bbox[2] + bbox[3]));
+        bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] - bbox[1], bbox[2] + bbox[3]));
+        bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] - bbox[1], bbox[2] - bbox[3]));
+        bbox_pt.push_back(OpenMesh::Vec2d(bbox[0] + bbox[1], bbox[2] - bbox[3]));
+        for (int i = 0; i < 4; i++)
+            add_point_constraint(bbox_pt[i], in_pt_map, in_points, p_id);
+        for (int i = 0; i < 4; i++) {
+            m_features.push_back(std::make_pair(bbox_pt[i], bbox_pt[(i + 1) % 4]));
+            add_segment_constraint(in_pt_map[bbox_pt[i]], in_pt_map[bbox_pt[(i + 1) % 4]], seg_id, in_segments, in_segment_markers);
+        }
     }
-
     triangulateio t_in = {}, t_out = {};
     t_in.numberofpoints = p_id;
     if (t_in.numberofpoints > 0)
@@ -343,13 +366,14 @@ void AngleBounded2DSimplificationPlugin::delaunayMeshing() {
 }
 
 void AngleBounded2DSimplificationPlugin::triangulate_random() {
+    bb = true;
     if (OpenFlipper::Options::gui()) {
         get_parameters();
-        std::cout << "---- Triangulate ----" << std::endl;
-        std::cout << "Seed: " << seed << std::endl;
-        std::cout << "Number of constraints: " << n_constraints << std::endl;
-        std::cout << "Angle: " << theta_triangulate << " = " << theta_triangulate * 180 / M_PI << " degrees" << std::endl;
     }
+    std::cout << "---- Triangulate ----" << std::endl;
+    std::cout << "Seed: " << seed << std::endl;
+    std::cout << "Number of constraints: " << n_constraints << std::endl;
+    std::cout << "Angle: " << theta_triangulate << " = " << theta_triangulate * 180 / M_PI << " degrees" << std::endl;
     get_constraints();
     BaseObjectData* base;
     emit addEmptyObject(DATA_TRIANGLE_MESH, id);
@@ -369,8 +393,85 @@ void AngleBounded2DSimplificationPlugin::triangulate_random() {
     mesh->update_normals();
     if (OpenFlipper::Options::gui()) {
         emit updatedObject(id, UPDATE_ALL);
-        std::cout << "Number of triangles: " << mesh->n_faces() << std::endl;
     }
+    std::cout << "Number of triangles: " << mesh->n_faces() << std::endl;
+}
+
+void AngleBounded2DSimplificationPlugin::triangulate_file(std::string filename) {
+    bb = false;
+    if (OpenFlipper::Options::gui()) {
+        get_parameters();
+    }
+    std::cout << "---- Triangulate ----" << std::endl;
+    std::cout << filename << std::endl;
+    if (id != -1) {
+        emit deleteObject(id);
+    }
+    std::ifstream file(filename);
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(file, line)) {
+        lines.push_back(line);
+    }
+    std::vector<std::vector<double>> vertices;
+    for (auto line : lines) {
+        size_t pos = line.find(" ");
+        std::string type = line.substr(0, pos);
+        line.erase(0, pos + 1);
+        if (type == "v") {
+            std::vector<double> vertex(2);
+            pos = line.find(" ");
+            vertex[0] = std::stod(line.substr(0, pos));
+            line.erase(0, pos + 1);
+            vertex[1] = std::stod(line);
+            vertices.push_back(vertex);
+        }
+    }
+    std::vector<std::pair<OpenMesh::Vec2d, OpenMesh::Vec2d>> features;
+    for (auto line : lines) {
+        size_t pos = line.find(" ");
+        std::string type = line.substr(0, pos);
+        line.erase(0, pos + 1);
+        if (type == "l") {
+            std::pair<OpenMesh::Vec2d, OpenMesh::Vec2d> l;
+            pos = line.find(" ");
+            l.first = OpenMesh::Vec2d(vertices[std::stoi(line.substr(0, pos)) - 1].data());
+            line.erase(0, pos + 1);
+            l.second = OpenMesh::Vec2d(vertices[std::stoi(line) - 1].data());
+            features.push_back(l);
+        }
+    }
+    m_features = features;
+
+    std::list<std::pair<OpenMesh::Vec2d, OpenMesh::Vec2d>> data;
+    unsigned int old_count = 0;
+    while (old_count != m_features.size()) {
+        data.clear();
+        data.insert(data.begin(), m_features.begin(), m_features.end());
+        m_features.clear();
+        old_count = data.size();
+        intersection_test(data);
+    }
+
+    BaseObjectData* base;
+    emit addEmptyObject(DATA_TRIANGLE_MESH, id);
+    if (!PluginFunctions::getObject(id, base)) {
+        std::cerr << "Couldn't get new mesh!\n";
+        return;
+    }
+    base->target(false);
+    base->setObjectDrawMode(ACG::SceneGraph::DrawModes::WIREFRAME, false);
+    mesh = PluginFunctions::triMesh(base);
+    mesh->add_property(is_feature_node, "is_feature_node");
+    mesh->add_property(is_on_feature, "is_on_feature");
+    mesh->add_property(feature_id, "feature_id");
+    delaunayMeshing();
+    mesh->garbage_collection();
+    mesh->update_normals();
+    if (OpenFlipper::Options::gui()) {
+        emit updatedObject(id, UPDATE_ALL);
+    }
+    std::cout << "Number of triangles: " << mesh->n_faces() << std::endl;
 }
 
 // --------------------------------------------------------------------------------------------------------------------------------
@@ -582,6 +683,7 @@ std::pair<TriMesh::Point, double> AngleBounded2DSimplificationPlugin::pos(std::v
 
     } else if (strategy == 1 || strategy == 2) {
 
+#ifdef GUROBI
         try {
             env.set(GRB_IntParam_OutputFlag, 0);
             GRBModel model = GRBModel(env);
@@ -617,6 +719,7 @@ std::pair<TriMesh::Point, double> AngleBounded2DSimplificationPlugin::pos(std::v
         } catch (GRBException e) {
             std::cout << "Gurobi exception " << e.getErrorCode() << " " << e.getMessage() << std::endl;
         }
+#endif
 
     } else if (strategy == 3) {
 
@@ -781,17 +884,17 @@ struct Collapse {
 void AngleBounded2DSimplificationPlugin::decimate() {
     if (OpenFlipper::Options::gui()) {
         get_parameters();
-        std::cout << "---- Decimate    ----" << std::endl;
-        std::cout << "Angle: " << theta << " = " << theta * 180 / M_PI << " degrees" << std::endl;
-        std::cout << "Prioritize: " << prio << std::endl;
-        std::cout << "Use halfedge collapses: " << use_halfedge_collapses << std::endl;
-        std::cout << "Use edge collapses: " << use_edge_collapses << std::endl;
-        std::cout << "Use triangle collapses: " << use_triangle_collapses << std::endl;
-        std::cout << "Prioritize triangle collapses: " << prio_triangle_collapses << std::endl;
-        std::cout << "Strategy: " << strategy << std::endl;
-        std::cout << "Number of triangles before: " << mesh->n_faces() << std::endl;
-        std::cout << "..." << std::endl;
     }
+    std::cout << "---- Decimate    ----" << std::endl;
+    std::cout << "Angle: " << theta << " = " << theta * 180 / M_PI << " degrees" << std::endl;
+    std::cout << "Prioritize: " << prio << std::endl;
+    std::cout << "Use halfedge collapses: " << use_halfedge_collapses << std::endl;
+    std::cout << "Use edge collapses: " << use_edge_collapses << std::endl;
+    std::cout << "Use triangle collapses: " << use_triangle_collapses << std::endl;
+    std::cout << "Prioritize triangle collapses: " << prio_triangle_collapses << std::endl;
+    std::cout << "Strategy: " << strategy << std::endl;
+    std::cout << "Number of triangles before: " << mesh->n_faces() << std::endl;
+    std::cout << "..." << std::endl;
     std::chrono::time_point<std::chrono::high_resolution_clock> start = std::chrono::high_resolution_clock::now();
 
     auto get_triangle_collapse = [this](OpenMesh::FaceHandle f) {
@@ -1134,7 +1237,7 @@ void AngleBounded2DSimplificationPlugin::decimate() {
     runtime = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
     if (OpenFlipper::Options::gui()) {
         emit updatedObject(id, UPDATE_ALL);
-        std::cout << "Number of triangles after: " << mesh->n_faces() << std::endl;
-        std::cout << "Time: " << runtime << "ms" << std::endl;
     }
+    std::cout << "Number of triangles after: " << mesh->n_faces() << std::endl;
+    std::cout << "Time: " << runtime << "ms" << std::endl;
 }

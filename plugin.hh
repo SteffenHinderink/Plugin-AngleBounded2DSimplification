@@ -22,7 +22,9 @@
 extern "C" {
 #include "triangle.h"
 }
+#ifdef GUROBI
 #include <gurobi_c++.h>
+#endif
 
 class AngleBounded2DSimplificationPlugin : public QObject, BaseInterface, LoadSaveInterface, ToolboxInterface {
     Q_OBJECT
@@ -48,8 +50,10 @@ public:
 private slots:
     void noguiSupported() {}
     void initializePlugin();
+    void pluginsInitialized(const QVector<QPair<QString, QString>>&);
 
     void triangulate_random();
+    void triangulate_file(std::string filename);
     void start_thread();
 
 private:
@@ -71,6 +75,7 @@ private:
     QSpinBox* in_strategy;
 
     std::vector<std::pair<OpenMesh::Vec2d, OpenMesh::Vec2d>> m_features;
+    bool bb;
 
     std::thread algo_thread;
 
